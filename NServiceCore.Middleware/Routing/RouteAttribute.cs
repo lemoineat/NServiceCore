@@ -5,7 +5,7 @@ using System.Text;
 namespace NServiceCore.Middleware.Routing
 {
     //TODO define attribute scope
-    [AttributeUsage(AttributeTargets.Class, AllowMultiple=true)]
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
     public class RouteAttribute : Attribute
     {
         /// <summary>
@@ -32,5 +32,16 @@ namespace NServiceCore.Middleware.Routing
         public string Endpoint { get; set; }
 
         public string Method { get; set; }
+
+        //internal PathParameter[] Parameters  { get; set; }
+    }
+
+    public class PathParameter
+    {
+        internal int PathIndex { get; set; }
+
+        internal string MappedPropertyName { get; set; }
+
+        internal string ParameterValue { get; set; }
     }
 }

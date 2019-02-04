@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using NServiceCore.Middleware;
 using NServiceCore.Contracts;
+using NServiceCore.Middleware.Handlers;
 
 namespace ASPServiceCore
 {
@@ -17,7 +18,14 @@ namespace ASPServiceCore
         // For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
         public void ConfigureServices(IServiceCollection services)
         {
+//            services.AddTransient<IHandler>();
+            RegisterHandlers(services);
             NServiceCoreMiddlewareServices.ConfigureServices(services, typeof(StatusQuery).Assembly);
+        }
+
+        private void RegisterHandlers(IServiceCollection services)
+        {
+            this.GetType().Assembly.GetTypes().Where(t => t.IsAssignableFrom(typeof(IHandler)));
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.

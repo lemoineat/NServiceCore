@@ -12,16 +12,18 @@ namespace NServiceCore.Middleware.Handlers
     {
         public Dictionary<Type, (Type, MethodInfo)> ContractToHandler { get; }
 
-        public HandlerMapperInitializer(Assembly endpointAssembly, ContractRouteInitializer routes)
+        public HandlerMapperInitializer(ContractRouteInitializer routes)
         {
             var allContracts = routes.ContractsType;
-            var allHandlers = FindHandlers(endpointAssembly);
+            var assembly = Assembly.GetEntryAssembly();
+            var allHandlers = FindHandlers(assembly);
             ContractToHandler = BuilderMapper(allContracts, allHandlers);
         }
 
         public IEnumerable<Type> FindHandlers(Assembly endpointAssembly)
         {
-            return endpointAssembly.GetTypes().Where(t => t.IsAssignableFrom(typeof(IHandler)));
+            //type extension here?
+            return endpointAssembly.GetTypes().Where(t => t.GetInterfaces().Contains(typeof(IHandler)));
         }
 
         public Dictionary<Type, (Type, MethodInfo)> BuilderMapper(IEnumerable<Type> contracts, IEnumerable<Type> handlers)
@@ -66,13 +68,13 @@ namespace NServiceCore.Middleware.Handlers
         private bool IsHttpVerb(string name)
         {
             name = name.ToUpper();
-            return new[] { "GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH" }.Contains(name);
+            return new[] { "GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH" }.Contains(name); //Move to cosntants & interfaces
         }
 
         private bool IsTaskType(Type T)
         {
             if (T.IsGenericType)
-                return T == typeof(Task<>);
+                return T.GetGenericTypeDefinition() == typeof(Task<>);
             return T == typeof(Task);
         }
     }

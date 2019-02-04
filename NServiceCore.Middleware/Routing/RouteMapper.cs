@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace NServiceCore.Middleware.Routing
@@ -19,28 +20,44 @@ namespace NServiceCore.Middleware.Routing
         internal void AddRoute(Type t, string path, string verb)
         {
             verb = verb.ToUpper();
-            var pathParameters = new List<string>();
+            //var pathParameters = new List<string>();
             var tokenizedPath = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
             var currentParent = root;
+            List<PathParameter> pathParameters = new List<PathParameter>();
             for(int i = 0; i < tokenizedPath.Length; i++)
             {
                 var component = tokenizedPath[i];
-                string componentName = IsPathParameter(t, component) ? ParameterDelimiter  : component;
+                string componentKey = component;
+                if (IsPathParameter(t, component))
+                {
+                    componentKey = ParameterDelimiter;
+                    pathParameters.Add(new PathParameter
+                    {
+                        PathIndex = i,
+                        MappedPropertyName = component.Substring(1, component.Length - 2)
+                    });
+                }
 
                 //TODO allow configurable case sensitive endpoints.
-                componentName = componentName.ToLower();
-                if (!currentParent.Children.ContainsKey(componentName))
+                componentKey = componentKey.ToLower();
+                if (!currentParent.Children.ContainsKey(componentKey))
                 {
-                    currentParent.Children[componentName] = new RouteKey();
+                    currentParent.Children[componentKey] = new RouteKey();
                 }
-                currentParent = currentParent.Children[componentName];
+                currentParent = currentParent.Children[componentKey];
             }
             //Set the type
-            if(currentParent.ContractByVerb.ContainsKey(verb))
+            var conflictingRoute = currentParent.Contracts.FirstOrDefault(c => c.Verb == verb);
+            if (conflictingRoute != null)
             {
-                throw new RouteValidationException($"Type {t.Name} and {currentParent.ContractByVerb[verb].Name} conflict for the same endpoint and verb ({verb}). This API does not currently support branching on types.");
+                throw new RouteValidationException($"Type {t.Name} and {conflictingRoute.ContractType.Name} conflict for the same endpoint and verb ({verb}). This API does not support branching on types.");
             }
-            currentParent.ContractByVerb[verb] = t;
+            currentParent.Contracts.Add(new RouteLeaf
+            {
+                ContractType = t,
+                Verb = verb,
+                OrderedParams = pathParameters
+            });
         }
 
         private bool IsPathParameter(Type t, string component)
@@ -60,57 +77,93 @@ namespace NServiceCore.Middleware.Routing
             return false;
         }
 
-        internal Type GetMatchingContractType(string path, string verb)
+        internal (Type,IEnumerable<PathParameter>) GetMatchingContractType(string path, string verb)
         {
             var tokenizedPath = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
             verb = verb.ToUpper();
-            return MatchingContract(tokenizedPath, verb, root);
+            var bestRoute = MatchingContract(tokenizedPath, verb, root, new List<PathParameter>());
+            var (routeDescrip, pathParams) = bestRoute;
+            if(routeDescrip == null)
+            {
+                return (null, null);
+            }
+            MapPropertyNames(routeDescrip, pathParams);
+
+            return (routeDescrip.ContractType, pathParams);
         }
 
-        private Type MatchingContract(string[] pathTokens, string verb, RouteKey node, int startIndex = 0)
+        private (RouteLeaf route, List<PathParameter> pathParams) MatchingContract(string[] pathTokens, string verb, RouteKey root, List<PathParameter> @params, int startIndex = 0)
         {
-            var currentParent = root;
             if(startIndex == pathTokens.Length)
             {
-                if (!node.ContractByVerb.ContainsKey(verb))
+                var routeMatch = root.Contracts.FirstOrDefault(leaf => leaf.Verb == verb);
+                if (routeMatch == null)
                 {
-                    return null;
+                    return (null, null);
                 }
-                return node.ContractByVerb[verb];
+                return (routeMatch, @params);
             }
             var component = pathTokens[startIndex];
             //TODO allow configurable case sensitive mapping;
-            component = component.ToLower();
-            if (node.Children.ContainsKey(component))
+            var componentLower = component.ToLower();
+            if (root.Children.ContainsKey(componentLower))
             {
-                Type possibleMatch = MatchingContract(pathTokens, verb, node.Children[component], startIndex + 1);
-                if(possibleMatch != null)
+                var (match, pathParams) = MatchingContract(pathTokens, verb, root.Children[componentLower], @params, startIndex + 1);
+                if(match != null)
                 {
-                    return possibleMatch;
+                    return (match, pathParams);
                 }
             }
-            if (node.Children.ContainsKey(ParameterDelimiter))
+            if (root.Children.ContainsKey(ParameterDelimiter))
             {
-                Type possibleMatch = MatchingContract(pathTokens, verb, node.Children[ParameterDelimiter], startIndex + 1);
-                if (possibleMatch != null)
+                @params.Add(new PathParameter
                 {
-                    return possibleMatch;
+                    PathIndex = startIndex,
+                    MappedPropertyName = null,
+                    ParameterValue = component
+                });
+                var (match, pathParams) = MatchingContract(pathTokens, verb, root.Children[ParameterDelimiter], @params, startIndex + 1);
+                if (match != null)
+                {
+                    return (match, pathParams);
                 }
             }
-            return null;
+            return (null, null);
+        }
+
+
+        private void MapPropertyNames(RouteLeaf route, IList<PathParameter> @params)
+        {
+            for(int i = 0; i < @params.Count(); i++)
+            {
+                var param = @params[i];
+                param.MappedPropertyName = route.OrderedParams[i].MappedPropertyName;
+            }
         }
 
         private class RouteKey
         {
             public RouteKey()
             {
+                Contracts = new List<RouteLeaf>();
                 Children = new Dictionary<string, RouteKey>();
-                ContractByVerb = new Dictionary<string, Type>();
+                WildcardChildren = new Dictionary<string, RouteKey>();
             }
 
-            internal Dictionary<string, Type> ContractByVerb;
+            internal readonly List<RouteLeaf> Contracts;
 
             internal readonly Dictionary<string, RouteKey> Children;
+
+            internal readonly Dictionary<string, RouteKey> WildcardChildren;
+        }
+
+        internal class RouteLeaf
+        {
+            internal Type ContractType { get; set; }
+            
+            internal string Verb { get; set; }
+
+            internal IList<PathParameter> OrderedParams { get; set; }
         }
     }
 
